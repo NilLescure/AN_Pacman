@@ -121,13 +121,13 @@ class ReflexCaptureAgent(CaptureAgent):
         return {'successor_score': 1.0}
 
 class OffensiveReflexAgent(ReflexCaptureAgent):
-    FOOD_THRESHOLD = 10  # Collect two food pellets before returning home
-    RETURN_REWARD = 1000  # Reward for successfully returning home
+    FOOD_THRESHOLD = 2  # Collect two food pellets before returning near the defensive agent
+    RETURN_REWARD = 1000  # Reward for successfully reaching near the defensive agent
 
     def __init__(self, index, time_for_computing=0.1):
         super().__init__(index, time_for_computing)
         self.food_carried = 0  # Track the number of food pellets collected
-        self.mode = 'collect'  # Modes: 'collect' or 'return'
+        self.mode = 'collect'  # Modes: 'collect' or 'return_near_defensive'
 
     def get_features(self, game_state, action):
         features = util.Counter()
@@ -135,6 +135,10 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         my_pos = successor.get_agent_state(self.index).get_position()
         food_list = self.get_food(game_state).as_list()  # Current food list
         successor_food_list = self.get_food(successor).as_list()  # Food list after action
+
+        # Locate the defensive agent
+        defensive_agent_index = self.get_team(game_state)[1] if self.index == self.get_team(game_state)[0] else self.get_team(game_state)[0]
+        defensive_agent_pos = game_state.get_agent_position(defensive_agent_index)
 
         # Collect mode logic
         if self.mode == 'collect':
@@ -147,16 +151,16 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
             if my_pos in food_list and my_pos not in successor_food_list:
                 self.food_carried += 1  # Increment food count only if food is eaten
                 if self.food_carried >= self.FOOD_THRESHOLD:
-                    self.mode = 'return'  # Transition to return mode
+                    self.mode = 'return_near_defensive'  # Transition to return mode near defensive agent
 
-        # Return mode logic
-        if self.mode == 'return':
-            # Prioritize returning to the starting position
-            dist_to_start = self.get_maze_distance(my_pos, self.start)
-            features['distance_to_start'] = dist_to_start
+        # Return mode logic: Move towards the defensive agent
+        if self.mode == 'return_near_defensive':
+            # Prioritize moving toward the defensive agent
+            dist_to_defensive_agent = self.get_maze_distance(my_pos, defensive_agent_pos)
+            features['distance_to_defensive_agent'] = dist_to_defensive_agent
 
-            # Check if the agent has returned home
-            if my_pos == self.start:
+            # If near the defensive agent, reset to collect mode
+            if dist_to_defensive_agent <= 2:  # Within a certain distance of the defensive agent
                 features['return_bonus'] = 1
                 self.mode = 'collect'  # Reset to collect mode
                 self.food_carried = 0  # Reset food count
@@ -183,10 +187,10 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
                 'ghost_distance': 2,          # Reward keeping distance from ghosts
                 'ghost_proximity': -1000,     # Strongly penalize being close to ghosts
             }
-        elif self.mode == 'return':
+        elif self.mode == 'return_near_defensive':
             weights = {
-                'distance_to_start': -10,     # Strong preference for returning home quickly
-                'return_bonus': self.RETURN_REWARD,  # Reward for reaching home
+                'distance_to_defensive_agent': -10,  # Strong preference for getting closer to the defensive agent
+                'return_bonus': self.RETURN_REWARD,  # Reward for reaching near defensive agent
                 'ghost_distance': 2,          # Reward keeping distance from ghosts
                 'ghost_proximity': -1000,     # Strongly penalize being close to ghosts
             }
