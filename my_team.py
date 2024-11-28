@@ -120,30 +120,78 @@ class ReflexCaptureAgent(CaptureAgent):
         """
         return {'successor_score': 1.0}
 
-
 class OffensiveReflexAgent(ReflexCaptureAgent):
-    """
-  A reflex agent that seeks food. This is an agent
-  we give you to get an idea of what an offensive agent might look like,
-  but it is by no means the best or only way to build an offensive agent.
-  """
+    FOOD_THRESHOLD = 10  # Collect two food pellets before returning home
+    RETURN_REWARD = 1000  # Reward for successfully returning home
+
+    def __init__(self, index, time_for_computing=0.1):
+        super().__init__(index, time_for_computing)
+        self.food_carried = 0  # Track the number of food pellets collected
+        self.mode = 'collect'  # Modes: 'collect' or 'return'
 
     def get_features(self, game_state, action):
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-        food_list = self.get_food(successor).as_list()
-        features['successor_score'] = -len(food_list)  # self.getScore(successor)
+        my_pos = successor.get_agent_state(self.index).get_position()
+        food_list = self.get_food(game_state).as_list()  # Current food list
+        successor_food_list = self.get_food(successor).as_list()  # Food list after action
 
-        # Compute distance to the nearest food
+        # Collect mode logic
+        if self.mode == 'collect':
+            # Prioritize the nearest food
+            if food_list:
+                min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
+                features['distance_to_food'] = min_distance
 
-        if len(food_list) > 0:  # This should always be True,  but better safe than sorry
-            my_pos = successor.get_agent_state(self.index).get_position()
-            min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
-            features['distance_to_food'] = min_distance
+            # Check if food is eaten
+            if my_pos in food_list and my_pos not in successor_food_list:
+                self.food_carried += 1  # Increment food count only if food is eaten
+                if self.food_carried >= self.FOOD_THRESHOLD:
+                    self.mode = 'return'  # Transition to return mode
+
+        # Return mode logic
+        if self.mode == 'return':
+            # Prioritize returning to the starting position
+            dist_to_start = self.get_maze_distance(my_pos, self.start)
+            features['distance_to_start'] = dist_to_start
+
+            # Check if the agent has returned home
+            if my_pos == self.start:
+                features['return_bonus'] = 1
+                self.mode = 'collect'  # Reset to collect mode
+                self.food_carried = 0  # Reset food count
+
+        # Ghost avoidance
+        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
+        ghosts = [a for a in enemies if not a.is_pacman and a.get_position() is not None]
+        if ghosts:
+            ghost_dists = [self.get_maze_distance(my_pos, ghost.get_position()) for ghost in ghosts]
+            min_ghost_distance = min(ghost_dists)
+
+            # Penalize being near ghosts
+            if min_ghost_distance <= 2:  # Danger zone
+                features['ghost_proximity'] = 1  # Immediate escape
+            features['ghost_distance'] = min_ghost_distance
+
         return features
 
     def get_weights(self, game_state, action):
-        return {'successor_score': 100, 'distance_to_food': -1}
+        # Adjust weights dynamically based on mode
+        if self.mode == 'collect':
+            weights = {
+                'distance_to_food': -10,       # Strong preference for closer food
+                'ghost_distance': 2,          # Reward keeping distance from ghosts
+                'ghost_proximity': -1000,     # Strongly penalize being close to ghosts
+            }
+        elif self.mode == 'return':
+            weights = {
+                'distance_to_start': -10,     # Strong preference for returning home quickly
+                'return_bonus': self.RETURN_REWARD,  # Reward for reaching home
+                'ghost_distance': 2,          # Reward keeping distance from ghosts
+                'ghost_proximity': -1000,     # Strongly penalize being close to ghosts
+            }
+        return weights
+
 
 
 class DefensiveReflexAgent(ReflexCaptureAgent):
@@ -157,27 +205,42 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
     def get_features(self, game_state, action):
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-
         my_state = successor.get_agent_state(self.index)
         my_pos = my_state.get_position()
 
-        # Computes whether we're on defense (1) or offense (0)
-        features['on_defense'] = 1
-        if my_state.is_pacman: features['on_defense'] = 0
+        # Defensive posture
+        features['on_defense'] = 1 if not my_state.is_pacman else 0
 
-        # Computes distance to invaders we can see
+        # Invader tracking
         enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
         invaders = [a for a in enemies if a.is_pacman and a.get_position() is not None]
         features['num_invaders'] = len(invaders)
-        if len(invaders) > 0:
-            dists = [self.get_maze_distance(my_pos, a.get_position()) for a in invaders]
+        if invaders:
+            dists = [self.get_maze_distance(my_pos, invader.get_position()) for invader in invaders]
             features['invader_distance'] = min(dists)
 
-        if action == Directions.STOP: features['stop'] = 1
+        # Patrolling critical zones
+        food_defending = self.get_food_you_are_defending(game_state).as_list()
+        if food_defending:
+            min_food_dist = min([self.get_maze_distance(my_pos, food) for food in food_defending])
+            features['distance_to_food'] = min_food_dist
+
+        # Penalize stationary or reversed movement
+        if action == Directions.STOP:
+            features['stop'] = 1
         rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
-        if action == rev: features['reverse'] = 1
+        if action == rev:
+            features['reverse'] = 1
 
         return features
 
     def get_weights(self, game_state, action):
-        return {'num_invaders': -1000, 'on_defense': 100, 'invader_distance': -10, 'stop': -100, 'reverse': -2}
+        return {
+            'num_invaders': -1000,
+            'on_defense': 100,
+            'invader_distance': -10,
+            'distance_to_food': -5,
+            'stop': -100,
+            'reverse': -2
+        }
+
