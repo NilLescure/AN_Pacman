@@ -119,7 +119,7 @@ class ReflexCaptureAgent(CaptureAgent):
         a counter or a dictionary.
         """
         return {'successor_score': 1.0}
-
+  
 class OffensiveReflexAgent(ReflexCaptureAgent):
     FOOD_THRESHOLD = 2  # Collect two food pellets before returning near the defensive agent
     RETURN_REWARD = 1000  # Reward for successfully reaching near the defensive agent
