@@ -243,19 +243,20 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         layout_height = game_state.data.layout.height
         mid_x = layout_width // 2
 
-        # Depending on the color of our team we defend left or right side
-
-        # If we are red team we defend the left side
-        if self.red:
-            mid_x -= 1
-        # If we are blue team we defend the right side
-        else:
-            mid_x += 1
-
         # We find a central y-coordinate not blocked by walls
         central_y = layout_height // 2
         while game_state.has_wall(mid_x, central_y):
             central_y += 1
+        
+        # Depending on the color of our team we defend left or right side
+
+        # If we are red team we defend the left side
+        if self.red:
+            mid_x -= 2
+        # If we are blue team we defend the right side
+        else:
+            mid_x += 1
+            central_y -= 1
 
         # We return the coordinate x and y where we want to defend
         return (mid_x, central_y)
