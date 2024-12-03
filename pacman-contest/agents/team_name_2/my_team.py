@@ -117,121 +117,81 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
     """
     Our offensive reflex agent will take one food and immediately returns home, then he return to search food
     """
-
     def choose_action(self, game_state):
         """
-        We override the default action selection to apply our logic
+        Chooses an action based on the current game state.
         """
-
-        # We initialize varaibles
+        # We initialize some variables
         actions = game_state.get_legal_actions(self.index)
         my_state = game_state.get_agent_state(self.index)
         my_pos = my_state.get_position()
-        carried_food = my_state.num_carrying
+        food = self.get_food(game_state).as_list()
+        enemies = [game_state.get_agent_state(i) for i in self.get_opponents(game_state)]
 
-        # If the agent is carrying food, we only consider actions that reduce distance to home
-        if carried_food > 0:
+        ghosts = [agent for agent in enemies if not agent.is_pacman and agent.get_position() is not None]
+        scared_ghosts = [ghost for ghost in ghosts if ghost.scared_timer > 0]
+        attaking_ghosts = [ghost for ghost in ghosts if ghost not in scared_ghosts]
+
+        food_carring = my_state.num_carrying
+
+        # We see if there is any food near
+        food_near = any(self.get_maze_distance(my_pos, food_pos) <5 for food_pos in food)
+
+        # If the agent is not carring food or there is food near we do the following
+        if food_carring == 0 or food_near:
             
-            # We initialize varaibles
+            # We calculate the closest food
+            food_distances = [(self.get_maze_distance(my_pos, food_pos), food_pos) for food_pos in food]
+            closest_food = min(food_distances, key=lambda x: x[0])[1]
+        
+            # We compute the distance to the ghosts
+            ghosts_distances = [(self.get_maze_distance(my_pos, ghost.get_position()), ghost.get_position())for ghost in attaking_ghosts if ghost.get_position()]
+            
+            if ghosts_distances:
+                # If there is ghosts we compute the min distance to a ghost
+                closest_ghost_dist = min(ghosts_distances, key=lambda x: x[0])[0]
+                
+                if closest_ghost_dist < 3 and food_carring != 0:
+                    # If the min distance to a ghost is less than 3 and the agent is carring food we return the best actions to go to our side
+                    best_action = None
+                    min_distance = float('inf')
+                    for action in actions:
+                        successor = self.get_successor(game_state, action)
+                        new_pos = successor.get_agent_state(self.index).get_position()
+                        distance = self.get_maze_distance(new_pos, self.start)
+                        if distance < min_distance:
+                            min_distance = distance
+                            best_action = action
+                    return best_action
+                        
+            # We return the best action to go to the closest food being carefull with the ghosts
             best_action = None
-            min_home_distance = float('inf')
-
-            # We iterate through all the actions and return the action that minimizes the distance to home
+            min_distance = float('inf')
             for action in actions:
                 successor = self.get_successor(game_state, action)
-                successor_pos = successor.get_agent_state(self.index).get_position()
-                home_distance = self.get_maze_distance(successor_pos, self.start)
-
-                if home_distance < min_home_distance:
-                    min_home_distance = home_distance
+                new_pos = successor.get_agent_state(self.index).get_position()
+                distance = self.get_maze_distance(new_pos, closest_food)
+                ghosts_distances = [self.get_maze_distance(new_pos, ghost.get_position()) for ghost in attaking_ghosts if ghost.get_position()]
+                if distance < min_distance and all(dist > 1 for dist, ghost in zip(ghosts_distances, attaking_ghosts)):
+                    min_distance = distance
                     best_action = action
-
-            return best_action
-
-        # If the agent is NOT carrying food, we prioritize the nearest food
-        else:
-
-            # We get the food list
-            food_list = self.get_food(game_state).as_list()
-
-            # If there is some food to eat we return the best action to minimize the distance to the food
-            if len(food_list) > 0:
-                min_food_distance = float('inf')
-                best_action = None
-
-                for action in actions:
-                    successor = self.get_successor(game_state, action)
-                    successor_pos = successor.get_agent_state(self.index).get_position()
-                    distance_to_food = min(
-                        [self.get_maze_distance(successor_pos, food) for food in food_list]
-                    )
-
-                    if distance_to_food < min_food_distance:
-                        min_food_distance = distance_to_food
-                        best_action = action
-
+            if best_action:
                 return best_action
 
-        # If we have not return an action we choose a random legal action as a fallback
-        return random.choice(actions)
-
-    def get_features(self, game_state, action):
-        """
-        We compute features for evaluation
-        """
-
-        # We initialize varaibles
-        features = util.Counter()
-        successor = self.get_successor(game_state, action)
-        my_pos = successor.get_agent_state(self.index).get_position()
-        carried_food = successor.get_agent_state(self.index).num_carrying
-
-        # If the agent is carring food, the distance to home becomes the only feature
-        if carried_food > 0:
-            home_dist = self.get_maze_distance(my_pos, self.start)
-            features['distance_to_home'] = home_dist
-        
-        # If the agent is NOT carring food, the distance to nearest food becomes the only feature
-        else:
-            food_list = self.get_food(successor).as_list()
-            if len(food_list) > 0:
-                min_food_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
-                features['distance_to_food'] = min_food_distance
-
-        return features
-
-    def get_weights(self, game_state, action):
-        """
-        We adjust weights to enforce strict behavior
-        """
-
-        # We initialize the carried food
-        carried_food = game_state.get_agent_state(self.index).num_carrying
-
-        # If the agent is carring food, we only consider returning home
-        if carried_food > 0:
-            # We minimize distance to home
-            return {'distance_to_home': -1}
-        
-        # If the agent is NOT carring food, we only consider getting food
-        else:
-            # We minimize distance to food
-            return {'distance_to_food': -1}
+        # If the agent is carring food and he does not have food near, we return the best action to go our side
+        best_action = None
+        min_distance = float('inf')
+        for action in actions:
+            successor = self.get_successor(game_state, action)
+            new_pos = successor.get_agent_state(self.index).get_position()
+            distance = self.get_maze_distance(new_pos, self.start)
+            if distance < min_distance:
+                min_distance = distance
+                best_action = action
+        return best_action
 
 
 class DefensiveReflexAgent(ReflexCaptureAgent):
-    """
-    We define a defensive agent that stays near the center of the defensive area and actively intercepts invaders
-    """
-
-    def register_initial_state(self, game_state):
-        """
-        We initialize the agent's central defensive position
-        """
-        super().register_initial_state(game_state)
-
-        # We define a central defensive position
-        self.mid_defensive_position = self.get_defensive_center(game_state)
 
     def get_defensive_center(self, game_state):
         """
@@ -261,77 +221,60 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         # We return the coordinate x and y where we want to defend
         return (mid_x, central_y)
 
-    def choose_action(self, game_state):
-        """
-        We choose the best action to maintain a defensive position or intercept invaders
-        """
-
-        # We initialize actions
-        actions = game_state.get_legal_actions(self.index)
-
-        # We evaluate actions based on features and weights
-        values = [self.evaluate(game_state, action) for action in actions]
-        max_value = max(values)
-        best_actions = [a for a, v in zip(actions, values) if v == max_value]
-
-        # We choose randomly among the best actions
-        return random.choice(best_actions)
-
     def get_features(self, game_state, action):
         """
-        We compute features for defensive behavior.
+        We compute the features.
         """
-
-        # We initialize varaibles
+        # We initialize some features
         features = util.Counter()
         successor = self.get_successor(game_state, action)
-        my_pos = successor.get_agent_position(self.index)
+        my_state = successor.get_agent_state(self.index)
+        my_pos = my_state.get_position()
 
-        # We define the defensive position feature (distance to the central defensive position)
-        features['distance_to_center'] = self.get_maze_distance(my_pos, self.mid_defensive_position)
+        # We define the defense status, if it is a ghost or a pacman
+        features['on_defense'] = 1
+        if my_state.is_pacman:
+            features['on_defense'] = 0
 
-        # We check for visible invaders
+        # We compute the number of invaders
         enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
         invaders = [a for a in enemies if a.is_pacman and a.get_position() is not None]
-
         features['num_invaders'] = len(invaders)
 
-        # If there is one (or more) invaders, we get the distance to the invader
-        if len(invaders) > 0:
-            invader_distances = [self.get_maze_distance(my_pos, invader.get_position()) for invader in invaders]
-            features['invader_distance'] = min(invader_distances)
-        # If there is NOT invaders, we penalize straying far from the center
+        # FWe compute the distance to the nearest invader
+        if invaders:
+            dists = [self.get_maze_distance(my_pos, a.get_position()) for a in invaders]
+            features['invader_distance'] = min(dists)
         else:
-            features['distance_to_center'] = self.get_maze_distance(my_pos, self.mid_defensive_position)
+            features['invader_distance'] = 0
 
-        # We discourage stopping or reversing direction unnecessarily
-        if action == Directions.STOP:
-            features['stop'] = 1
-        rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
-        if action == rev:
-            features['reverse'] = 1
+        # We compute the distance to nearest food being defended
+        food_list = self.get_food_you_are_defending(successor).as_list()
+        if food_list:
+            min_distance = min(self.get_maze_distance(my_pos, food) for food in food_list)
+            features['distance_to_food'] = min_distance
+        else:
+            features['distance_to_food'] = 0
+
+        # We compute the distance to the central defensive position
+        features['distance_to_center'] = self.get_maze_distance(my_pos, self.get_defensive_center(game_state))
+
+        # We define the stop and reverse
+        features['stop'] = 1 if action == Directions.STOP else 0
+        current_direction = game_state.get_agent_state(self.index).configuration.direction
+        successor_direction = successor.get_agent_state(self.index).configuration.direction
+        features['reverse'] = 1 if successor_direction == Directions.REVERSE[current_direction] else 0
 
         # We return the features
         return features
 
     def get_weights(self, game_state, action):
-        """
-        We adjust weights for defensive behavior.
-        """
-
-        # We define the weights
-        weights = {
-            'num_invaders': -1000,     # We strongly prioritize intercepting invaders
-            'invader_distance': -10,   # We minimize distance to invaders
-            'distance_to_center': -5,  # We stay close to the defensive center
-            'stop': -100,              # We penalize stopping
-            'reverse': -2,             # We penalize reversing direction
+        return {
+            'num_invaders': -1000,     # We give high priority to block invaders
+            'on_defense': 1000,        # We give high priority to staying on defense
+            'invader_distance': -20,   # We give strong penalty for being far from invaders
+            'distance_to_food': -1,    # We give a minor penalty for distance to food
+            'distance_to_center': -2,  # We encourage staying near the center
+            'stop': -100,              # We give penalty for stopping
+            'reverse': -5              # We give slight penalty for reversing
         }
-
-        # Dynamically, we increase priority for invaders if any are detected
-        if len([a for a in self.get_opponents(game_state) if game_state.get_agent_state(a).is_pacman]):
-            # We ignore center if invaders are present
-            weights['distance_to_center'] = 0
-
-        # We return the weights
-        return weights
