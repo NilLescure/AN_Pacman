@@ -114,9 +114,7 @@ class ReflexCaptureAgent(CaptureAgent):
 
 
 class OffensiveReflexAgent(ReflexCaptureAgent):
-    """
-    Our offensive reflex agent will take one food and immediately returns home, then he return to search food
-    """
+
     def choose_action(self, game_state):
         """
         Chooses an action based on the current game state.
